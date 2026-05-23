@@ -33,14 +33,12 @@ pub fn advance(codepoint: char) -> f32 {
 
 pub fn advance_bold(codepoint: char, bold: bool) -> f32 {
     let idx = glyph_index(codepoint as u32);
-    match idx {
-        Some(glyph_idx) => {
-            let (base, provider) = unpack(GLYPH_DATA[glyph_idx]);
-            let offset = if bold { provider.bold_offset() } else { 0.0 };
-            base as f32 + offset
-        }
-        None => 0.0,
-    }
+    let (base, provider) = match idx {
+        Some(glyph_idx) => unpack(GLYPH_DATA[glyph_idx]),
+        None => (6, GlyphProvider::Missing),
+    };
+    let offset = if bold { provider.bold_offset() } else { 0.0 };
+    base as f32 + offset
 }
 
 pub fn string_width(s: &str) -> f32 {
@@ -67,22 +65,25 @@ pub fn split_at_width_bold(s: &str, max_width: f32, bold: bool) -> (&str, &str) 
     (s, "")
 }
 
-pub fn glyph(codepoint: char) -> Option<Glyph> {
-    let idx = glyph_index(codepoint as u32)?;
-    let (advance, provider) = unpack(GLYPH_DATA[idx]);
-    Some(make_glyph(idx, advance, provider))
+pub fn glyph(codepoint: char) -> Glyph {
+    let idx = glyph_index(codepoint as u32);
+    match idx {
+        Some(idx) => make_glyph(idx),
+        None => Glyph::missing(),
+    }
 }
 
 #[cfg(feature = "bitmaps")]
-fn make_glyph(idx: usize, advance: u8, provider: GlyphProvider) -> Glyph {
+fn make_glyph(idx: usize) -> Glyph {
+    let (advance, provider) = unpack(GLYPH_DATA[idx]);
     let offset = BITMAP_OFFSETS[idx] as usize;
     let len = provider.pixel_data_len();
-    // for 0-length glyphs (space provider) this will be an empty slice
     let data = &BITMAP_DATA[offset..][..len];
     Glyph::new(advance, provider, data)
 }
 
 #[cfg(not(feature = "bitmaps"))]
-fn make_glyph(_idx: usize, advance: u8, provider: GlyphProvider) -> Glyph {
+fn make_glyph(idx: usize) -> Glyph {
+    let (advance, provider) = unpack(GLYPH_DATA[idx]);
     Glyph::new(advance, provider)
 }

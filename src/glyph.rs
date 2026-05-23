@@ -1,4 +1,3 @@
-// TODO: unknown characters (hardcoded 5*8 box in minecraft src)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GlyphProvider {
     Space,
@@ -6,6 +5,7 @@ pub enum GlyphProvider {
     Mojangles9x12,
     UnifontHalfwidth,
     UnifontFullwidth,
+    Missing,
 }
 
 impl GlyphProvider {
@@ -20,6 +20,7 @@ impl GlyphProvider {
         }
     }
 
+    #[cfg(feature = "bitmaps")]
     pub(crate) fn pixel_data_len(self) -> usize {
         let (w, h) = self.dimensions();
         (w as usize).div_ceil(8) * h as usize
@@ -32,6 +33,7 @@ impl GlyphProvider {
             Self::Mojangles9x12 => (9, 12),
             Self::UnifontHalfwidth => (8, 16),
             Self::UnifontFullwidth => (16, 16),
+            Self::Missing => (5, 8),
         }
     }
 
@@ -42,6 +44,7 @@ impl GlyphProvider {
             Self::Mojangles9x12 => 10,
             Self::UnifontHalfwidth => 14,
             Self::UnifontFullwidth => 14,
+            Self::Missing => 7,
         }
     }
 
@@ -52,6 +55,9 @@ impl GlyphProvider {
         }
     }
 }
+
+#[cfg(feature = "bitmaps")]
+const MISSING_BITMAP: &[u8] = &[0xF8, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0xF8];
 
 pub struct Glyph {
     base_advance: u8,
@@ -88,6 +94,21 @@ impl Glyph {
 
     pub fn advance_bold(&self) -> f32 {
         self.base_advance as f32 + self.provider.bold_offset()
+    }
+
+    pub(crate) fn missing() -> Self {
+        let provider = GlyphProvider::Missing;
+        let (width, height) = provider.dimensions();
+        let ascent = provider.ascent();
+        Glyph {
+            base_advance: 6,
+            provider,
+            width,
+            height,
+            ascent,
+            #[cfg(feature = "bitmaps")]
+            data: MISSING_BITMAP,
+        }
     }
 
     #[cfg(feature = "bitmaps")]

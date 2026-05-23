@@ -111,24 +111,24 @@ fn ideographic_space_advance() {
 
 #[test]
 fn glyph_provider() {
-    let space = minecraft_font::glyph(' ').unwrap();
+    let space = minecraft_font::glyph(' ');
     assert_eq!(space.provider, minecraft_font::GlyphProvider::Space);
     assert_eq!(space.width, 0);
     assert_eq!(space.height, 0);
 
-    let a = minecraft_font::glyph('A').unwrap();
+    let a = minecraft_font::glyph('A');
     assert_eq!(a.provider, minecraft_font::GlyphProvider::Mojangles8x8);
     assert_eq!(a.width, 8);
     assert_eq!(a.height, 8);
     assert_eq!(a.ascent, 7);
 
-    let euro = minecraft_font::glyph('\u{00C0}').unwrap(); // À in accented
+    let euro = minecraft_font::glyph('\u{00C0}'); // À in accented
     assert_eq!(euro.provider, minecraft_font::GlyphProvider::Mojangles9x12);
     assert_eq!(euro.width, 9);
     assert_eq!(euro.height, 12);
     assert_eq!(euro.ascent, 10);
 
-    let cjk = minecraft_font::glyph('\u{4E2D}').unwrap();
+    let cjk = minecraft_font::glyph('\u{4E2D}');
     assert_eq!(
         cjk.provider,
         minecraft_font::GlyphProvider::UnifontFullwidth
@@ -138,16 +138,52 @@ fn glyph_provider() {
     assert_eq!(cjk.ascent, 14);
 }
 
+#[test]
+fn missing_glyph() {
+    // U+FFFF is a defined as a noncharacter
+    let g = minecraft_font::glyph('\u{FFFF}');
+    assert_eq!(g.provider, minecraft_font::GlyphProvider::Missing);
+    assert_eq!(g.width, 5);
+    assert_eq!(g.height, 8);
+    assert_eq!(g.ascent, 7);
+    assert!((g.advance() - 6.0).abs() < 0.01);
+    assert!((g.advance_bold() - 7.0).abs() < 0.01);
+
+    let adv = minecraft_font::advance('\u{FFFF}');
+    assert!((adv - 6.0).abs() < 0.01);
+}
+
+#[test]
+fn missing_glyph_bold_advance() {
+    let normal = minecraft_font::advance('\u{FFFF}');
+    let bold = minecraft_font::advance_bold('\u{FFFF}', true);
+    assert!(
+        (bold - normal - 1.0).abs() < 0.01,
+        "missing bold offset: normal={normal} bold={bold}, expected diff 1.0"
+    );
+}
+
 #[cfg(feature = "bitmaps")]
 #[test]
 fn glyph_pixel_access() {
-    let glyph = minecraft_font::glyph('A').unwrap();
+    let glyph = minecraft_font::glyph('A');
     assert!(glyph.rows().any(|row| row.iter().any(|&b| b != 0)));
 }
 
 #[cfg(feature = "bitmaps")]
 #[test]
 fn glyph_cjk_pixels() {
-    let glyph = minecraft_font::glyph('\u{4E2D}').unwrap();
+    let glyph = minecraft_font::glyph('\u{4E2D}');
     assert!(glyph.rows().any(|row| row.iter().any(|&b| b != 0)));
+}
+
+#[cfg(feature = "bitmaps")]
+#[test]
+fn missing_glyph_pixels() {
+    let g = minecraft_font::glyph('\u{FFFF}');
+    // border pixels should be set
+    assert_eq!(g.pixel(0, 0), Some(true)); // top-left corner
+    assert_eq!(g.pixel(2, 2), Some(false)); // interior
+    assert_eq!(g.pixel(4, 7), Some(true)); // bottom-right corner
+    assert_eq!(g.pixel(5, 0), None); // out of bounds
 }
