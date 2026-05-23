@@ -50,8 +50,8 @@ fn process_mojangles(glyphs: &mut BTreeMap<u32, GlyphData>) {
     let data = std::fs::read_to_string(format!("{DATA_DIR}/mojangles/default.json")).unwrap();
     let parsed: MojanglesJson = serde_json::from_str(&data).unwrap();
 
-    for raw in parsed.providers {
-        let (file, gw, gh) = match raw.file.as_str() {
+    for provider_config in parsed.providers {
+        let (file, cell_width, cell_height) = match provider_config.file.as_str() {
             "minecraft:font/ascii.png" => ("mojangles/ascii.png", 8u32, 8u32),
             "minecraft:font/accented.png" => ("mojangles/accented.png", 9u32, 12u32),
             "minecraft:font/nonlatin_european.png" => {
@@ -59,30 +59,33 @@ fn process_mojangles(glyphs: &mut BTreeMap<u32, GlyphData>) {
             }
             _ => continue,
         };
-        let img = load_png(file);
-        let bpr = gw.div_ceil(8) as usize;
+        let atlas = load_png(file);
+        let bytes_per_row = cell_width.div_ceil(8) as usize;
 
-        for (y, row) in raw.chars.iter().enumerate() {
-            for (x, ch) in row.chars().enumerate() {
-                let cp = ch as u32;
-                let (ox, oy) = (x as u32 * gw, y as u32 * gh);
-                let mut rows = vec![0u8; gh as usize * bpr];
-                for r in 0..gh {
-                    for c in 0..gw {
-                        let px = img.get_pixel(ox + c, oy + r);
-                        if px.0[3] != 0 {
-                            let bi = r as usize * bpr + (c as usize / 8);
-                            rows[bi] |= 1 << (7 - (c % 8));
+        for (grid_row, chars_in_row) in provider_config.chars.iter().enumerate() {
+            for (grid_col, codepoint_char) in chars_in_row.chars().enumerate() {
+                let codepoint = codepoint_char as u32;
+                let origin_x = grid_col as u32 * cell_width;
+                let origin_y = grid_row as u32 * cell_height;
+                let mut pixel_rows = vec![0u8; cell_height as usize * bytes_per_row];
+                for pixel_y in 0..cell_height {
+                    for pixel_x in 0..cell_width {
+                        let pixel = atlas.get_pixel(origin_x + pixel_x, origin_y + pixel_y);
+                        if pixel.0[3] != 0 {
+                            let byte_idx =
+                                pixel_y as usize * bytes_per_row + (pixel_x as usize / 8);
+                            pixel_rows[byte_idx] |= 1 << (7 - (pixel_x % 8));
                         }
                     }
                 }
-                let actual = mojangles_rightmost_width(&rows, gw);
-                let advance = ((0.5 + actual as f64) as u8) + 1;
-                let prov = if gw == 8 { 1 } else { 2 };
-                glyphs.entry(cp).or_insert(GlyphData {
+                let rightmost_width = mojangles_rightmost_width(&pixel_rows, cell_width);
+                // TODO: check minecraft src for advance for empty glyph (currently 0+1=1)
+                let advance = ((0.5 + rightmost_width as f64) as u8) + 1;
+                let prov = if cell_width == 8 { 1 } else { 2 };
+                glyphs.entry(codepoint).or_insert(GlyphData {
                     advance,
                     provider: prov,
-                    rows,
+                    rows: pixel_rows,
                 });
             }
         }
@@ -138,21 +141,21 @@ fn process_unifont(glyphs: &mut BTreeMap<u32, GlyphData>) {
     }
 }
 
-fn mojangles_rightmost_width(rows: &[u8], glyph_w: u32) -> u8 {
-    let bpr = glyph_w.div_ceil(8) as usize;
-    if bpr == 0 {
+fn mojangles_rightmost_width(rows: &[u8], cell_width: u32) -> u8 {
+    let bytes_per_row = cell_width.div_ceil(8) as usize;
+    if bytes_per_row == 0 {
         return 0;
     }
-    let gh = rows.len() / bpr;
+    let cell_height = rows.len() / bytes_per_row;
     let mut rightmost = 0u32;
     let mut found = false;
-    for r in 0..gh {
-        for c in 0..glyph_w {
-            let bi = r * bpr + (c as usize / 8);
-            if rows[bi] & (1 << (7 - (c % 8))) != 0 {
+    for pixel_y in 0..cell_height {
+        for pixel_x in 0..cell_width {
+            let byte_idx = pixel_y * bytes_per_row + (pixel_x as usize / 8);
+            if rows[byte_idx] & (1 << (7 - (pixel_x % 8))) != 0 {
                 found = true;
-                if c > rightmost {
-                    rightmost = c;
+                if pixel_x > rightmost {
+                    rightmost = pixel_x;
                 }
             }
         }
@@ -194,7 +197,6 @@ fn compute_unifont_width(cp: u32, rows: &[u8], overrides: &[OverrideRange]) -> u
     }
 }
 
-// TODO: check if some of these can return fixed-size arrays instead of dynamic Vecs
 fn parse_unifont_halfwidth(hex: &str) -> Vec<u8> {
     let bytes = hex.as_bytes();
     let mut rows = vec![0u8; 16];
@@ -225,7 +227,7 @@ fn hex_val(ch: u8) -> u8 {
     }
 }
 
-fn load_png(rel: &str) -> image::ImageBuffer<image::Rgba<u8>, Vec<u8>> {
+fn load_png(rel: &str) -> image::RgbaImage {
     image::open(format!("{DATA_DIR}/{rel}")).unwrap().to_rgba8()
 }
 
