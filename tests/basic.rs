@@ -95,9 +95,18 @@ fn bold_advance_unifont() {
 }
 
 #[test]
-fn euro_advance() {
-    let adv = minecraft_font::advance('\u{20AC}'); // € in nonlatin_european
-    assert!(adv > 0.0, "euro advance={adv}, expected > 0");
+fn em_quad_advance() {
+    let adv = minecraft_font::advance('\u{2001}'); // half-width empty glyph
+    assert!((adv - 5.0) < 0.01, "em quad advance={adv}, expected 5.0");
+}
+
+#[test]
+fn ideographic_space_advance() {
+    let adv = minecraft_font::advance('\u{3000}'); // full-width empty glyph
+    assert!(
+        (adv - 9.0) < 0.01,
+        "ideographic space advance={adv}, expected 9.0"
+    );
 }
 
 #[test]

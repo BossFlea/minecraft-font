@@ -9,8 +9,8 @@ pub enum GlyphProvider {
 }
 
 impl GlyphProvider {
-    pub(crate) fn from_u8(v: u8) -> Self {
-        match v {
+    pub(crate) fn from_u8(value: u8) -> Self {
+        match value {
             0 => Self::Space,
             1 => Self::Mojangles8x8,
             2 => Self::Mojangles9x12,
@@ -95,8 +95,8 @@ impl Glyph {
         if x >= self.width || y >= self.height {
             return None;
         }
-        let bpr = (self.width as usize).div_ceil(8);
-        let byte_idx = y as usize * bpr + (x as usize / 8);
+        let bytes_per_row = (self.width as usize).div_ceil(8);
+        let byte_idx = y as usize * bytes_per_row + (x as usize / 8);
         let bit = 1 << (7 - (x % 8));
         self.data.get(byte_idx).map(|&b| (b & bit) != 0)
     }
@@ -105,7 +105,7 @@ impl Glyph {
     pub fn rows(&self) -> GlyphRows<'_> {
         GlyphRows {
             data: self.data,
-            bpr: (self.width as usize).div_ceil(8),
+            bytes_per_row: (self.width as usize).div_ceil(8),
             row: 0,
             height: self.height,
         }
@@ -115,7 +115,7 @@ impl Glyph {
 #[cfg(feature = "bitmaps")]
 pub struct GlyphRows<'a> {
     data: &'a [u8],
-    bpr: usize,
+    bytes_per_row: usize,
     row: u8,
     height: u8,
 }
@@ -127,8 +127,8 @@ impl<'a> Iterator for GlyphRows<'a> {
         if self.row >= self.height {
             return None;
         }
-        let start = self.row as usize * self.bpr;
+        let start = self.row as usize * self.bytes_per_row;
         self.row += 1;
-        Some(&self.data[start..start + self.bpr])
+        Some(&self.data[start..start + self.bytes_per_row])
     }
 }

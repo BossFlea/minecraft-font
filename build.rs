@@ -79,7 +79,6 @@ fn process_mojangles(glyphs: &mut BTreeMap<u32, GlyphData>) {
                     }
                 }
                 let rightmost_width = mojangles_rightmost_width(&pixel_rows, cell_width);
-                // TODO: check minecraft src for advance for empty glyph (currently 0+1=1)
                 let advance = ((0.5 + rightmost_width as f64) as u8) + 1;
                 let prov = if cell_width == 8 { 1 } else { 2 };
                 glyphs.entry(codepoint).or_insert(GlyphData {
@@ -101,11 +100,11 @@ fn process_unifont(glyphs: &mut BTreeMap<u32, GlyphData>) {
         .iter()
         .filter(|p| p.hex_file == "minecraft:font/unifont.zip")
         .flat_map(|p| &p.size_overrides)
-        .map(|o| OverrideRange {
-            from: o.from.chars().next().unwrap() as u32,
-            to: o.to.chars().next().unwrap() as u32,
-            left: o.left,
-            right: o.right,
+        .map(|override_entry| OverrideRange {
+            from: override_entry.from.chars().next().unwrap() as u32,
+            to: override_entry.to.chars().next().unwrap() as u32,
+            left: override_entry.left,
+            right: override_entry.right,
         })
         .collect();
 
@@ -164,21 +163,21 @@ fn mojangles_rightmost_width(rows: &[u8], cell_width: u32) -> u8 {
 }
 
 fn compute_unifont_width(cp: u32, rows: &[u8], overrides: &[OverrideRange]) -> u8 {
-    for o in overrides {
-        if cp >= o.from && cp <= o.to {
-            return o.right - o.left + 1;
+    for range in overrides {
+        if cp >= range.from && cp <= range.to {
+            return range.right - range.left + 1;
         }
     }
 
-    let is_fullwidth = rows.len() == 32;
-    if is_fullwidth {
+    let cell_w = if rows.len() == 32 { 16u8 } else { 8u8 };
+    if cell_w == 16 {
         let mut or_mask = 0u16;
-        for i in 0..16 {
-            let row = ((rows[i * 2] as u16) << 8) | rows[i * 2 + 1] as u16;
+        for row_idx in 0..16 {
+            let row = ((rows[row_idx * 2] as u16) << 8) | rows[row_idx * 2 + 1] as u16;
             or_mask |= row;
         }
         if or_mask == 0 {
-            return 0;
+            return cell_w + 1;
         }
         let left = or_mask.leading_zeros();
         let right = 15 - or_mask.trailing_zeros();
@@ -189,7 +188,7 @@ fn compute_unifont_width(cp: u32, rows: &[u8], overrides: &[OverrideRange]) -> u
             or_mask |= row;
         }
         if or_mask == 0 {
-            return 0;
+            return cell_w + 1;
         }
         let left = or_mask.leading_zeros();
         let right = 7 - or_mask.trailing_zeros();
@@ -200,8 +199,8 @@ fn compute_unifont_width(cp: u32, rows: &[u8], overrides: &[OverrideRange]) -> u
 fn parse_unifont_halfwidth(hex: &str) -> Vec<u8> {
     let bytes = hex.as_bytes();
     let mut rows = vec![0u8; 16];
-    for i in 0..16 {
-        rows[i] = hex_val(bytes[i * 2]) << 4 | hex_val(bytes[i * 2 + 1]);
+    for row_idx in 0..16 {
+        rows[row_idx] = hex_val(bytes[row_idx * 2]) << 4 | hex_val(bytes[row_idx * 2 + 1]);
     }
     rows
 }
@@ -209,20 +208,20 @@ fn parse_unifont_halfwidth(hex: &str) -> Vec<u8> {
 fn parse_unifont_fullwidth(hex: &str) -> Vec<u8> {
     let bytes = hex.as_bytes();
     let mut rows = vec![0u8; 32];
-    for i in 0..16 {
-        let hi = hex_val(bytes[i * 4]) << 4 | hex_val(bytes[i * 4 + 1]);
-        let lo = hex_val(bytes[i * 4 + 2]) << 4 | hex_val(bytes[i * 4 + 3]);
-        rows[i * 2] = hi;
-        rows[i * 2 + 1] = lo;
+    for row_idx in 0..16 {
+        let upper = hex_val(bytes[row_idx * 4]) << 4 | hex_val(bytes[row_idx * 4 + 1]);
+        let lower = hex_val(bytes[row_idx * 4 + 2]) << 4 | hex_val(bytes[row_idx * 4 + 3]);
+        rows[row_idx * 2] = upper;
+        rows[row_idx * 2 + 1] = lower;
     }
     rows
 }
 
-fn hex_val(ch: u8) -> u8 {
-    match ch {
-        b'0'..=b'9' => ch - b'0',
-        b'a'..=b'f' => ch - b'a' + 10,
-        b'A'..=b'F' => ch - b'A' + 10,
+fn hex_val(hex_digit: u8) -> u8 {
+    match hex_digit {
+        b'0'..=b'9' => hex_digit - b'0',
+        b'a'..=b'f' => hex_digit - b'a' + 10,
+        b'A'..=b'F' => hex_digit - b'A' + 10,
         _ => 0,
     }
 }
@@ -271,12 +270,12 @@ fn write_output(
     writeln!(out, "pub(crate) static GLYPH_DATA: &[u8] = &[").unwrap();
     let values: Vec<u8> = glyphs
         .values()
-        .map(|g| (g.provider << 5) | g.advance)
+        .map(|glyph| (glyph.provider << 5) | glyph.advance)
         .collect();
     for chunk in values.chunks(20) {
         write!(out, "   ").unwrap();
-        for &v in chunk {
-            write!(out, " 0x{v:02X},").unwrap();
+        for &value in chunk {
+            write!(out, " 0x{value:02X},").unwrap();
         }
         writeln!(out).unwrap();
     }
@@ -290,12 +289,12 @@ fn write_output(
 fn write_bitmaps(out: &mut BufWriter<File>, glyphs: &BTreeMap<u32, GlyphData>) {
     writeln!(out, "pub(crate) static BITMAP_OFFSETS: &[u32] = &[").unwrap();
     let mut flat: Vec<u8> = Vec::new();
-    for g in glyphs.values() {
-        if g.rows.is_empty() {
+    for glyph in glyphs.values() {
+        if glyph.rows.is_empty() {
             writeln!(out, "    0,").unwrap();
         } else {
             writeln!(out, "    {},", flat.len()).unwrap();
-            flat.extend_from_slice(&g.rows);
+            flat.extend_from_slice(&glyph.rows);
         }
     }
     writeln!(out, "];").unwrap();
@@ -303,8 +302,8 @@ fn write_bitmaps(out: &mut BufWriter<File>, glyphs: &BTreeMap<u32, GlyphData>) {
     writeln!(out, "pub(crate) static BITMAP_DATA: &[u8] = &[").unwrap();
     for chunk in flat.chunks(30) {
         write!(out, "   ").unwrap();
-        for &b in chunk {
-            write!(out, " {b},").unwrap();
+        for &byte in chunk {
+            write!(out, " {byte},").unwrap();
         }
         writeln!(out).unwrap();
     }

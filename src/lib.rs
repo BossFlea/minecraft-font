@@ -34,9 +34,9 @@ pub fn advance(codepoint: char) -> f32 {
 pub fn advance_bold(codepoint: char, bold: bool) -> f32 {
     let idx = glyph_index(codepoint as u32);
     match idx {
-        Some(i) => {
-            let (base, prov) = unpack(GLYPH_DATA[i]);
-            let offset = if bold { prov.bold_offset() } else { 0.0 };
+        Some(glyph_idx) => {
+            let (base, provider) = unpack(GLYPH_DATA[glyph_idx]);
+            let offset = if bold { provider.bold_offset() } else { 0.0 };
             base as f32 + offset
         }
         None => 0.0,
@@ -57,10 +57,10 @@ pub fn split_at_width(s: &str, max_width: f32) -> (&str, &str) {
 
 pub fn split_at_width_bold(s: &str, max_width: f32, bold: bool) -> (&str, &str) {
     let mut width = 0.0_f32;
-    for (i, ch) in s.char_indices() {
+    for (byte_offset, ch) in s.char_indices() {
         let ch_width = advance_bold(ch, bold);
         if width + ch_width > max_width {
-            return (&s[..i], &s[i..]);
+            return (&s[..byte_offset], &s[byte_offset..]);
         }
         width += ch_width;
     }
